@@ -126,7 +126,7 @@ public class DragonTamerPlugin extends JavaPlugin {
 
     public void reloadPlugin() {
         reloadConfig();
-        messageUtils.reload();
+        plugin.reloadConfig()
         getLogger().info("DragonTamer конфиг перезагружен.");
     }
 
