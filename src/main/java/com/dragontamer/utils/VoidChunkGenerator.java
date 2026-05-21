@@ -5,9 +5,11 @@ import org.bukkit.generator.ChunkGenerator;
 import java.util.Random;
 
 public class VoidChunkGenerator extends ChunkGenerator {
+    
     @Override
-    public ChunkData generateChunkData(World world, Random random, int chunkX, int chunkZ, BiomeGrid biome) {
-        return createChunkData(world);
+    public byte[] generate(World world, Random random, int chunkX, int chunkZ) {
+        // 1.12.2 использует byte[] вместо ChunkData
+        return new byte[65536];
     }
     
     @Override
