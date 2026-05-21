@@ -1,8 +1,8 @@
 package com.dragontamer.managers;
 
 import com.dragontamer.DragonTamerPlugin;
-import com.dragontamer.data.Dragon;
 import com.dragontamer.VoidChunkGenerator;
+import com.dragontamer.data.Dragon;
 import org.bukkit.*;
 import org.bukkit.block.Block;
 import org.bukkit.boss.BarColor;
@@ -11,6 +11,7 @@ import org.bukkit.boss.BossBar;
 import org.bukkit.entity.EnderDragon;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Player;
+import org.bukkit.generator.ChunkGenerator;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.Vector;
@@ -29,9 +30,9 @@ public class BattleManager {
     private final Map<UUID, UUID> watcherBattleMap = new HashMap<>();
 
     // Константы арены
-    private static final int ARENA_SIZE = 51;      // Нечётное число для симметрии
+    private static final int ARENA_SIZE = 51;
     private static final int ARENA_HALF = 25;
-    private static final int PLATFORM_Y = 100;     // Высота платформы
+    private static final int PLATFORM_Y = 100;
     private static final int WALL_HEIGHT = 20;
     private static final double ORBIT_RADIUS = 22.0;
     private static final double ORBIT_HEIGHT = 18.0;
@@ -42,39 +43,64 @@ public class BattleManager {
     }
 
     // =========================================================================
-    //  Публичные методы
+    //  ПУБЛИЧНЫЕ МЕТОДЫ ДЛЯ КОМАНД
     // =========================================================================
 
-    public void sendBattleRequest(UUID challengerUUID, UUID targetUUID) {
-        pendingRequests.put(challengerUUID, targetUUID);
-        new BukkitRunnable() {
-            @Override public void run() {
-                pendingRequests.remove(challengerUUID, targetUUID);
-            }
-        }.runTaskLater(plugin, 30 * 20L);
+    /**
+     * Отправить запрос на битву
+     */
+    public void sendChallenge(Player challenger, Player target) {
+        sendBattleRequest(challenger.getUniqueId(), target.getUniqueId());
     }
 
-    public UUID getChallengerFor(UUID targetUUID) {
-        for (Map.Entry<UUID, UUID> e : pendingRequests.entrySet())
-            if (e.getValue().equals(targetUUID)) return e.getKey();
-        return null;
+    /**
+     * Принять запрос на битву
+     */
+    public void acceptChallenge(Player player) {
+        UUID challengerUUID = getChallengerFor(player.getUniqueId());
+        if (challengerUUID == null) {
+            plugin.getMessageUtils().send(player, "battle-no-pending");
+            return;
+        }
+        startBattle(challengerUUID, player.getUniqueId());
     }
 
-    public void rejectRequest(UUID targetUUID) {
-        UUID challenger = getChallengerFor(targetUUID);
-        if (challenger != null) pendingRequests.remove(challenger);
+    /**
+     * Отклонить запрос на битву
+     */
+    public void rejectChallenge(Player player) {
+        UUID challengerUUID = getChallengerFor(player.getUniqueId());
+        if (challengerUUID == null) {
+            plugin.getMessageUtils().send(player, "battle-no-pending");
+            return;
+        }
+        rejectRequest(player.getUniqueId());
+        Player challenger = Bukkit.getPlayer(challengerUUID);
+        if (challenger != null) {
+            plugin.getMessageUtils().send(challenger, "battle-rejected", "{target}", player.getName());
+        }
+        plugin.getMessageUtils().send(player, "battle-rejected-self");
     }
 
+    /**
+     * Проверить, в битве ли игрок
+     */
     public boolean isInBattle(UUID uuid) {
         for (Battle b : activeBattles.values())
             if (b.challenger.equals(uuid) || b.target.equals(uuid)) return true;
         return false;
     }
 
+    /**
+     * Проверить, является ли игрок наблюдателем
+     */
     public boolean isWatcher(UUID playerUUID) {
         return watcherBattleMap.containsKey(playerUUID);
     }
 
+    /**
+     * Удалить наблюдателя
+     */
     public void removeWatcher(UUID watcherUUID) {
         UUID challengerUUID = watcherBattleMap.remove(watcherUUID);
         if (challengerUUID == null) return;
@@ -85,6 +111,9 @@ public class BattleManager {
         }
     }
 
+    /**
+     * Получить ключ битвы для участника
+     */
     public UUID getBattleKey(UUID participantUUID) {
         for (Map.Entry<UUID, Battle> e : activeBattles.entrySet()) {
             Battle b = e.getValue();
@@ -94,11 +123,117 @@ public class BattleManager {
         return null;
     }
 
+    /**
+     * Добавить наблюдателя
+     */
+    public void watchBattle(Player watcher, UUID challengerUUID) {
+        Battle battle = activeBattles.get(challengerUUID);
+        if (battle == null) {
+            plugin.getMessageUtils().sendRaw(watcher, "&cЭта битва уже завершилась.");
+            return;
+        }
+
+        Location arenaCenter = battle.arenaCenter;
+        if (arenaCenter == null) {
+            plugin.getMessageUtils().sendRaw(watcher, "&cНе могу найти арену битвы.");
+            return;
+        }
+
+        battle.watcherReturns.put(watcher.getUniqueId(), watcher.getLocation().clone());
+        battle.watchers.add(watcher.getUniqueId());
+        watcherBattleMap.put(watcher.getUniqueId(), challengerUUID);
+
+        // Телепорт на трибуны
+        Location seat = arenaCenter.clone().add(0, 2, -(ARENA_HALF - 3));
+        watcher.teleport(seat);
+
+        // Добавляем BossBar для наблюдателя
+        if (battle.challengerOwnBar != null) battle.challengerOwnBar.addPlayer(watcher);
+        if (battle.challengerEnemyBar != null) battle.challengerEnemyBar.addPlayer(watcher);
+
+        plugin.getMessageUtils().sendRaw(watcher, "&aВы наблюдаете за битвой!");
+    }
+
+    /**
+     * Уклонение
+     */
+    public boolean doDodge(Player player, String direction) {
+        long now = System.currentTimeMillis();
+        long cdMs = plugin.getConfig().getLong("battle.dodge-cooldown-seconds", 5) * 1000L;
+        Long last = dodgeCooldowns.get(player.getUniqueId());
+        
+        if (last != null && now - last < cdMs) {
+            long rem = (cdMs - (now - last)) / 1000 + 1;
+            plugin.getMessageUtils().send(player, "dodge-cooldown", "{time}", String.valueOf(rem));
+            return false;
+        }
+        
+        dodgeCooldowns.put(player.getUniqueId(), now);
+        
+        double strength = plugin.getConfig().getDouble("battle.dodge-strength", 1.6);
+        float yaw = player.getLocation().getYaw();
+        double yawRad = Math.toRadians(yaw);
+        Vector dodgeVec;
+        String dirKey;
+        
+        switch (direction.toLowerCase()) {
+            case "left":
+                dodgeVec = new Vector(-Math.cos(yawRad + Math.PI / 2), 0.4,
+                    -Math.sin(yawRad + Math.PI / 2)).normalize().multiply(strength);
+                dirKey = "влево";
+                break;
+            case "right":
+                dodgeVec = new Vector(-Math.cos(yawRad - Math.PI / 2), 0.4,
+                    -Math.sin(yawRad - Math.PI / 2)).normalize().multiply(strength);
+                dirKey = "вправо";
+                break;
+            case "up":
+                dodgeVec = new Vector(0, 1.0, 0).multiply(strength * 0.9);
+                dirKey = "вверх";
+                break;
+            default:
+                plugin.getMessageUtils().sendRaw(player, "&cНеверное направление! Используйте left, right или up.");
+                return false;
+        }
+        
+        player.setVelocity(dodgeVec);
+        player.getWorld().playSound(player.getLocation(), Sound.ENTITY_ENDERMEN_TELEPORT, 1f, 1.3f);
+        player.getWorld().spawnParticle(Particle.CLOUD, player.getLocation().add(0, 1, 0), 15, 0.4, 0.4, 0.4, 0.05);
+        plugin.getMessageUtils().send(player, "dodge-used", "{dir}", dirKey);
+        
+        return true;
+    }
+
     // =========================================================================
-    //  Запуск битвы
+    //  ВНУТРЕННИЕ МЕТОДЫ
     // =========================================================================
 
-    public void startBattle(UUID challengerUUID, UUID targetUUID) {
+    private void sendBattleRequest(UUID challengerUUID, UUID targetUUID) {
+        pendingRequests.put(challengerUUID, targetUUID);
+        new BukkitRunnable() {
+            @Override
+            public void run() {
+                pendingRequests.remove(challengerUUID, targetUUID);
+            }
+        }.runTaskLater(plugin, 30 * 20L);
+    }
+
+    private UUID getChallengerFor(UUID targetUUID) {
+        for (Map.Entry<UUID, UUID> e : pendingRequests.entrySet())
+            if (e.getValue().equals(targetUUID)) return e.getKey();
+        return null;
+    }
+
+    private void rejectRequest(UUID targetUUID) {
+        UUID challenger = getChallengerFor(targetUUID);
+        if (challenger != null) pendingRequests.remove(challenger);
+    }
+
+    // =========================================================================
+    //  ЗАПУСК БИТВЫ
+    // =========================================================================
+
+    private void startBattle(UUID challengerUUID, UUID targetUUID) {
         pendingRequests.remove(challengerUUID);
 
         Player challenger = Bukkit.getPlayer(challengerUUID);
@@ -195,7 +330,7 @@ public class BattleManager {
     }
 
     // =========================================================================
-    //  Построение арены
+    //  ПОСТРОЕНИЕ АРЕНЫ
     // =========================================================================
 
     private void buildArena(Location center, Battle battle) {
@@ -204,10 +339,9 @@ public class BattleManager {
         int cz = center.getBlockZ();
         ArenaData data = battle.arenaData;
 
-        // === 1. ОСНОВНАЯ ПЛАТФОРМА (пол) ===
+        // 1. ОСНОВНАЯ ПЛАТФОРМА (пол)
         for (int x = -ARENA_HALF; x <= ARENA_HALF; x++) {
             for (int z = -ARENA_HALF; z <= ARENA_HALF; z++) {
-                // Круглая арена
                 double dist = Math.sqrt(x * x + z * z);
                 if (dist <= ARENA_HALF) {
                     placeBlock(world, cx + x, PLATFORM_Y, cz + z, Material.STONE, data);
@@ -215,7 +349,7 @@ public class BattleManager {
             }
         }
 
-        // === 2. БОРТИК (по краю платформы) ===
+        // 2. БОРТИК
         for (int x = -ARENA_HALF; x <= ARENA_HALF; x++) {
             for (int z = -ARENA_HALF; z <= ARENA_HALF; z++) {
                 double dist = Math.sqrt(x * x + z * z);
@@ -227,39 +361,30 @@ public class BattleManager {
             }
         }
 
-        // === 3. СТЕНЫ (квадратные, за пределами круглой арены) ===
+        // 3. СТЕНЫ
         int wallYStart = PLATFORM_Y + 1;
         for (int y = 0; y <= WALL_HEIGHT; y++) {
-            // Северная стена
             for (int x = -ARENA_HALF - 2; x <= ARENA_HALF + 2; x++) {
                 placeBlock(world, cx + x, wallYStart + y, cz - ARENA_HALF - 2, Material.BARRIER, data);
-            }
-            // Южная стена
-            for (int x = -ARENA_HALF - 2; x <= ARENA_HALF + 2; x++) {
                 placeBlock(world, cx + x, wallYStart + y, cz + ARENA_HALF + 2, Material.BARRIER, data);
             }
-            // Западная стена
             for (int z = -ARENA_HALF - 2; z <= ARENA_HALF + 2; z++) {
                 placeBlock(world, cx - ARENA_HALF - 2, wallYStart + y, cz + z, Material.BARRIER, data);
-            }
-            // Восточная стена
-            for (int z = -ARENA_HALF - 2; z <= ARENA_HALF + 2; z++) {
                 placeBlock(world, cx + ARENA_HALF + 2, wallYStart + y, cz + z, Material.BARRIER, data);
             }
         }
 
-        // === 4. ТРИБУНЫ ДЛЯ ЗРИТЕЛЕЙ ===
+        // 4. ТРИБУНЫ
         for (int row = 0; row < 4; row++) {
-            int yOffset = row;
             int zNorth = cz - ARENA_HALF + row;
             int zSouth = cz + ARENA_HALF - row;
             for (int x = -ARENA_HALF + 2; x <= ARENA_HALF - 2; x++) {
-                placeBlock(world, cx + x, PLATFORM_Y + yOffset, zNorth, Material.QUARTZ_BLOCK, data);
-                placeBlock(world, cx + x, PLATFORM_Y + yOffset, zSouth, Material.QUARTZ_BLOCK, data);
+                placeBlock(world, cx + x, PLATFORM_Y + row, zNorth, Material.QUARTZ_BLOCK, data);
+                placeBlock(world, cx + x, PLATFORM_Y + row, zSouth, Material.QUARTZ_BLOCK, data);
             }
         }
 
-        // === 5. УГЛОВЫЕ КОЛОННЫ ===
+        // 5. УГЛОВЫЕ КОЛОННЫ
         for (int cxOff : new int[]{-ARENA_HALF - 2, ARENA_HALF + 2}) {
             for (int czOff : new int[]{-ARENA_HALF - 2, ARENA_HALF + 2}) {
                 for (int y = 0; y <= WALL_HEIGHT + 2; y++) {
@@ -280,7 +405,7 @@ public class BattleManager {
     }
 
     // =========================================================================
-    //  Плавный полёт по кругу
+    //  ПЛАВНЫЙ ПОЛЁТ
     // =========================================================================
 
     private void startFlightTask(Battle battle, Location center) {
@@ -312,7 +437,6 @@ public class BattleManager {
         double z = center.getZ() + ORBIT_RADIUS * Math.sin(angle);
         double y = center.getY() + ORBIT_HEIGHT;
         
-        // Направление взгляда по касательной
         float yaw = (float) (Math.toDegrees(Math.atan2(-Math.sin(angle), Math.cos(angle))) + 90);
         Location target = new Location(center.getWorld(), x, y, z, yaw, 5f);
         
@@ -327,7 +451,7 @@ public class BattleManager {
     }
 
     // =========================================================================
-    //  Интро и обратный отсчёт
+    //  ИНТРО И ОБРАТНЫЙ ОТСЧЁТ
     // =========================================================================
 
     private void startIntro(Battle battle, Player challenger, Player target,
@@ -337,7 +461,6 @@ public class BattleManager {
         plugin.getMessageUtils().sendRaw(challenger, "&6Драконы готовятся к бою! 10 секунд...");
         plugin.getMessageUtils().sendRaw(target, "&6Драконы готовятся к бою! 10 секунд...");
         
-        // Рёв драконов
         cEnt.getWorld().playSound(cEnt.getLocation(), Sound.ENTITY_ENDERDRAGON_GROWL, 2f, 0.8f);
         
         new BukkitRunnable() {
@@ -345,7 +468,7 @@ public class BattleManager {
             public void run() {
                 startCountdown(battle, challenger, target, cDragon, tDragon, cEnt, tEnt);
             }
-        }.runTaskLater(plugin, 200L); // 10 секунд
+        }.runTaskLater(plugin, 200L);
     }
 
     private void startCountdown(Battle battle, Player challenger, Player target,
@@ -376,7 +499,7 @@ public class BattleManager {
     }
 
     // =========================================================================
-    //  Запуск боевой фазы
+    //  ЗАПУСК БОЕВОЙ ФАЗЫ
     // =========================================================================
 
     private void launchBattle(Battle battle, Player challenger, Player target,
@@ -389,7 +512,6 @@ public class BattleManager {
         plugin.getMessageUtils().send(target, "battle-start");
         cEnt.getWorld().playSound(cEnt.getLocation(), Sound.ENTITY_ENDERDRAGON_GROWL, 2f, 1f);
         
-        // Запускаем ИИ каждые 15 тиков
         battle.aiTask = new BukkitRunnable() {
             @Override
             public void run() {
@@ -407,7 +529,6 @@ public class BattleManager {
             }
         }.runTaskTimer(plugin, 20L, 15L);
         
-        // Обновление BossBar
         battle.bossBarTask = new BukkitRunnable() {
             @Override
             public void run() {
@@ -424,7 +545,7 @@ public class BattleManager {
     }
 
     // =========================================================================
-    //  Завершение битвы
+    //  ЗАВЕРШЕНИЕ БИТВЫ
     // =========================================================================
 
     private void endBattle(Battle battle, Dragon cDragon, Dragon tDragon, boolean challengerWon) {
@@ -438,36 +559,31 @@ public class BattleManager {
         Player winnerPl = challengerWon ? challenger : target;
         Player loserPl = challengerWon ? target : challenger;
         
-        // Останавливаем задачи
         if (battle.aiTask != null) battle.aiTask.cancel();
         if (battle.bossBarTask != null) battle.bossBarTask.cancel();
         if (battle.flightTask != null) battle.flightTask.cancel();
         
-        // Убираем BossBar
         removeBars(battle);
         
-        // Удаляем драконов
         if (battle.challengerDragon != null) battle.challengerDragon.remove();
         if (battle.targetDragon != null) battle.targetDragon.remove();
         cDragon.setEntity(null);
         tDragon.setEntity(null);
         
-        // Награда победителю
         long winExp = plugin.getConfig().getLong("battle-win-exp", 50);
         plugin.getDragonManager().addExperience(winner, winExp);
+        
         if (winnerPl != null && winnerPl.isOnline()) {
             plugin.getMessageUtils().send(winnerPl, "battle-won", "{exp}", String.valueOf(winExp));
             winnerPl.getWorld().playSound(winnerPl.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1.5f, 1f);
             winnerPl.teleport(challengerWon ? battle.challengerReturn : battle.targetReturn);
             
-            // Респавн дракона
             plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
                 if (winnerPl.isOnline() && !winner.isRecovering())
                     plugin.getDragonManager().spawnDragonForPlayer(winnerPl, winner);
             }, 10L);
         }
         
-        // Наказание проигравшему
         long recoveryMin = plugin.getConfig().getLong("recovery-time", 5);
         long recoveryEnd = System.currentTimeMillis() + recoveryMin * 60_000L;
         loser.setRecoveryEndTime(recoveryEnd);
@@ -479,10 +595,8 @@ public class BattleManager {
             loserPl.teleport(challengerWon ? battle.targetReturn : battle.challengerReturn);
         }
         
-        // Возвращаем зрителей
         returnWatchers(battle);
         
-        // Очищаем арену
         final int slot = battle.arenaIndex;
         final ArenaData data = battle.arenaData;
         World world = battle.arenaCenter.getWorld();
@@ -494,7 +608,6 @@ public class BattleManager {
             }
         }.runTaskLater(plugin, 60L);
         
-        // Таймер восстановления проигравшего
         new BukkitRunnable() {
             @Override
             public void run() {
@@ -510,7 +623,7 @@ public class BattleManager {
     }
 
     // =========================================================================
-    //  Утилиты
+    //  УТИЛИТЫ
     // =========================================================================
 
     private void setupBattleDragon(EnderDragon entity, Dragon dragon) {
@@ -569,17 +682,8 @@ public class BattleManager {
         return ChatColor.stripColor(ChatColor.translateAlternateColorCodes('&', s));
     }
 
-    public boolean doDodge(Player player, String direction) {
-        // Аналогично твоей реализации
-        return true;
-    }
-
-    public void watchBattle(Player watcher, UUID challengerUUID) {
-        // Аналогично твоей реализации
-    }
-
     // =========================================================================
-    //  Внутренние классы
+    //  ВНУТРЕННИЕ КЛАССЫ
     // =========================================================================
 
     public static class Battle {
