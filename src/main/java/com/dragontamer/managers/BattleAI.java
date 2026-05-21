@@ -1,7 +1,6 @@
 package com.dragontamer.managers;
 
 import com.dragontamer.DragonTamerPlugin;
-import com.dragontamer.data.Dragon;
 import org.bukkit.Location;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
@@ -26,7 +25,7 @@ public class BattleAI {
         if (battle.challengerDragon == null || battle.targetDragon == null) return;
         if (battle.challengerDragon.isDead() || battle.targetDragon.isDead()) return;
 
-        // Атакуем каждые 2 секунды (40 тиков)
+        // Атакуем каждые 2 секунды
         tickDragon(battle.challenger, battle.challengerDragon, battle.targetDragon);
         tickDragon(battle.target, battle.targetDragon, battle.challengerDragon);
     }
@@ -37,7 +36,7 @@ public class BattleAI {
         long now = System.currentTimeMillis();
         Map<String, Long> cd = cooldowns.computeIfAbsent(owner, k -> new HashMap<>());
 
-        long cooldownTime = 2000; // 2 секунды между атаками
+        long cooldownTime = 2000; // 2 секунды
         Long lastAttack = cd.get("last_attack");
         
         if (lastAttack != null && now - lastAttack < cooldownTime) return;
@@ -74,9 +73,9 @@ public class BattleAI {
         fb.setYield(0);
         
         world.playSound(from, Sound.ENTITY_GHAST_SHOOT, 1.5f, 1f);
+        world.playSound(from, Sound.ENTITY_ENDERDRAGON_GROWL, 1f, 0.8f);
         world.spawnParticle(Particle.FLAME, from, 20, 1, 1, 1, 0.1);
         
-        // Урон через задержку
         applyDamage(victim, 8.0, 10L);
     }
 
@@ -111,12 +110,11 @@ public class BattleAI {
         Location victimLoc = victim.getLocation();
         World world = victimLoc.getWorld();
         
-        // Телепорт к жертве
         attacker.teleport(victimLoc.clone().add(0, 3, 0));
         
         world.spawnParticle(Particle.EXPLOSION_LARGE, victimLoc, 5, 1, 1, 1, 0);
-        world.spawnParticle(Particle.SWEEP_ATTACK, victimLoc, 10, 1, 1, 1, 0);
-        world.playSound(victimLoc, Sound.ENTITY_GENERIC_BIG_FALL, 1.5f, 0.8f);
+        world.spawnParticle(Particle.CRIT, victimLoc, 20, 1, 1, 1, 0.2);
+        world.playSound(victimLoc, Sound.ENTITY_IRONGOLEM_DEATH, 1.5f, 0.8f);
         
         applyDamage(victim, 12.0, 0L);
     }
@@ -130,6 +128,8 @@ public class BattleAI {
             Location hitLoc = victim.getLocation();
             hitLoc.getWorld().spawnParticle(Particle.EXPLOSION_LARGE, hitLoc, 3, 0.5, 0.5, 0.5, 0);
             hitLoc.getWorld().playSound(hitLoc, Sound.ENTITY_GENERIC_EXPLODE, 1f, 1.2f);
+            
+            plugin.getLogger().info("💥 Урон " + damage + ", осталось HP: " + newHp);
         }, delayTicks);
     }
 }
