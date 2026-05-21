@@ -313,7 +313,7 @@ public class BattleManager {
                 double dist = Math.sqrt(x * x + z * z);
                 if (dist > ARENA_HALF - 1 && dist <= ARENA_HALF + 1) {
                     for (int y = 1; y <= 2; y++) {
-                        placeBlock(world, cx + x, PLATFORM_Y + y, cz + z, Material.STONE_BRICKS, data);
+                        placeBlock(world, cx + x, PLATFORM_Y + y, cz + z, Material.SMOOTH_BRICK, data);
                     }
                 }
             }
