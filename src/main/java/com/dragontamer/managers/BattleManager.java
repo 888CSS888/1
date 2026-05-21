@@ -4,11 +4,11 @@ import com.dragontamer.DragonTamerPlugin;
 import com.dragontamer.VoidChunkGenerator;
 import com.dragontamer.data.Dragon;
 import org.bukkit.*;
-import org.bukkit.block.Block;
 import org.bukkit.boss.BarColor;
 import org.bukkit.boss.BarStyle;
 import org.bukkit.boss.BossBar;
 import org.bukkit.entity.EnderDragon;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitRunnable;
@@ -42,7 +42,7 @@ public class BattleManager {
     }
 
     // =========================================================================
-    //  ПУБЛИЧНЫЕ МЕТОДЫ
+    //  ПУБЛИЧНЫЕ МЕТОДЫ ДЛЯ КОМАНД
     // =========================================================================
 
     public void sendChallenge(Player challenger, Player target) {
@@ -118,7 +118,49 @@ public class BattleManager {
     }
 
     public boolean doDodge(Player player, String direction) {
-        // Упрощённая версия
+        long now = System.currentTimeMillis();
+        long cdMs = plugin.getConfig().getLong("battle.dodge-cooldown-seconds", 5) * 1000L;
+        Long last = dodgeCooldowns.get(player.getUniqueId());
+        
+        if (last != null && now - last < cdMs) {
+            long rem = (cdMs - (now - last)) / 1000 + 1;
+            plugin.getMessageUtils().send(player, "dodge-cooldown", "{time}", String.valueOf(rem));
+            return false;
+        }
+        
+        dodgeCooldowns.put(player.getUniqueId(), now);
+        
+        double strength = plugin.getConfig().getDouble("battle.dodge-strength", 1.6);
+        float yaw = player.getLocation().getYaw();
+        double yawRad = Math.toRadians(yaw);
+        Vector dodgeVec;
+        String dirKey;
+        
+        switch (direction.toLowerCase()) {
+            case "left":
+                dodgeVec = new Vector(-Math.cos(yawRad + Math.PI / 2), 0.4,
+                    -Math.sin(yawRad + Math.PI / 2)).normalize().multiply(strength);
+                dirKey = "влево";
+                break;
+            case "right":
+                dodgeVec = new Vector(-Math.cos(yawRad - Math.PI / 2), 0.4,
+                    -Math.sin(yawRad - Math.PI / 2)).normalize().multiply(strength);
+                dirKey = "вправо";
+                break;
+            case "up":
+                dodgeVec = new Vector(0, 1.0, 0).multiply(strength * 0.9);
+                dirKey = "вверх";
+                break;
+            default:
+                plugin.getMessageUtils().sendRaw(player, "&cНеверное направление! Используйте left, right или up.");
+                return false;
+        }
+        
+        player.setVelocity(dodgeVec);
+        player.getWorld().playSound(player.getLocation(), Sound.ENTITY_ENDERMAN_TELEPORT, 1f, 1.3f);
+        player.getWorld().spawnParticle(Particle.CLOUD, player.getLocation().add(0, 1, 0), 15, 0.4, 0.4, 0.4, 0.05);
+        plugin.getMessageUtils().send(player, "dodge-used", "{dir}", dirKey);
+        
         return true;
     }
 
@@ -133,6 +175,8 @@ public class BattleManager {
     // =========================================================================
 
     private void startBattle(UUID challengerUUID, UUID targetUUID) {
+        pendingRequests.remove(challengerUUID);
+
         Player challenger = Bukkit.getPlayer(challengerUUID);
         Player target = Bukkit.getPlayer(targetUUID);
         Dragon cDragon = plugin.getDragonManager().getDragon(challengerUUID);
@@ -140,24 +184,44 @@ public class BattleManager {
 
         if (challenger == null || target == null || cDragon == null || tDragon == null) return;
 
-        // Мир арены
+        // Проверяем максимальное количество битв
+        int maxBattles = plugin.getConfig().getInt("battle.max-concurrent-battles", 5);
+        if (activeBattles.size() >= maxBattles) {
+            plugin.getMessageUtils().sendRaw(challenger, "&cМаксимальное число битв достигнуто");
+            plugin.getMessageUtils().sendRaw(target, "&cМаксимальное число битв достигнуто");
+            return;
+        }
+
+        // Получаем или создаём мир арены
         World arenaWorld = Bukkit.getWorld("dragon_arena");
         if (arenaWorld == null) {
+            plugin.getLogger().warning("Мир dragon_arena не найден! Создаём...");
             WorldCreator wc = new WorldCreator("dragon_arena");
             wc.generator(new VoidChunkGenerator());
             wc.generateStructures(false);
             arenaWorld = wc.createWorld();
         }
 
-        // Слот арены
+        // ОЧИСТКА: удаляем всех старых драконов в мире арены
+        for (EnderDragon oldDragon : arenaWorld.getEntitiesByClass(EnderDragon.class)) {
+            oldDragon.remove();
+            plugin.getLogger().info("Удалён старый дракон из мира арены");
+        }
+
+        // Находим свободный слот
         int slot = 0;
         while (usedArenaSlots.contains(slot)) slot++;
         usedArenaSlots.add(slot);
 
-        Location arenaCenter = new Location(arenaWorld, slot * 200.0, PLATFORM_Y, 0);
+        double spacing = 200.0;
+        Location arenaCenter = new Location(arenaWorld, slot * spacing, PLATFORM_Y, 0);
+
+        // Строим арену
+        plugin.getMessageUtils().send(challenger, "battle-arena-building");
+        plugin.getMessageUtils().send(target, "battle-arena-building");
         buildArena(arenaCenter);
 
-        // Сохраняем позиции
+        // Сохраняем позиции для возврата
         Location cReturn = challenger.getLocation().clone();
         Location tReturn = target.getLocation().clone();
 
@@ -165,19 +229,19 @@ public class BattleManager {
         plugin.getDragonManager().despawnDragon(cDragon);
         plugin.getDragonManager().despawnDragon(tDragon);
 
-        // Телепортируем игроков
+        // Телепортируем игроков на безопасные позиции
         challenger.teleport(arenaCenter.clone().add(0, 2, -23));
         target.teleport(arenaCenter.clone().add(0, 2, 23));
 
-        // Спавним драконов (неуязвимых)
-        Location cSpawn = arenaCenter.clone().add(-ORBIT_RADIUS, ORBIT_HEIGHT, 0);
-        Location tSpawn = arenaCenter.clone().add(ORBIT_RADIUS, ORBIT_HEIGHT, 0);
+        // Спавним боевых драконов
+        Location cDragonLoc = arenaCenter.clone().add(-ORBIT_RADIUS, ORBIT_HEIGHT, 0);
+        Location tDragonLoc = arenaCenter.clone().add(ORBIT_RADIUS, ORBIT_HEIGHT, 0);
 
         double cMaxHp = plugin.getDragonManager().getMaxHealth(cDragon);
         double tMaxHp = plugin.getDragonManager().getMaxHealth(tDragon);
 
-        EnderDragon cEnt = spawnBattleDragon(arenaWorld, cSpawn, cDragon, cMaxHp);
-        EnderDragon tEnt = spawnBattleDragon(arenaWorld, tSpawn, tDragon, tMaxHp);
+        EnderDragon cEnt = spawnBattleDragon(arenaWorld, cDragonLoc, cDragon, cMaxHp);
+        EnderDragon tEnt = spawnBattleDragon(arenaWorld, tDragonLoc, tDragon, tMaxHp);
 
         // Сохраняем здоровье отдельно
         dragonHealth.put(cEnt, cMaxHp);
@@ -208,11 +272,11 @@ public class BattleManager {
         // Запускаем полёт
         startFlightTask(battle, arenaCenter);
 
-        // Запускаем защиту драконов от смерти (КРИТИЧЕСКИ ВАЖНО!)
+        // Запускаем защиту драконов от смерти
         startDragonProtection(battle);
 
-        // Интро и обратный отсчёт
-        startCountdown(battle, challenger, target, cDragon, tDragon, cEnt, tEnt);
+        // Запускаем интро и обратный отсчёт
+        startCountdown(battle, challenger, target);
     }
 
     // =========================================================================
@@ -222,7 +286,6 @@ public class BattleManager {
     private EnderDragon spawnBattleDragon(World world, Location loc, Dragon dragon, double maxHp) {
         EnderDragon entity = (EnderDragon) world.spawnEntity(loc, EntityType.ENDER_DRAGON);
         
-        // Отключаем ванильную логику дракона
         entity.setCustomName(ChatColor.translateAlternateColorCodes('&', 
             plugin.getDragonManager().getDragonDisplayName(dragon)));
         entity.setCustomNameVisible(true);
@@ -237,7 +300,7 @@ public class BattleManager {
     }
 
     // =========================================================================
-    //  ЗАЩИТА ОТ СМЕРТИ (критический фикс для 1.12.2)
+    //  ЗАЩИТА ОТ СМЕРТИ
     // =========================================================================
 
     private void startDragonProtection(Battle battle) {
@@ -251,7 +314,6 @@ public class BattleManager {
                 
                 // Защищаем драконов от ванильной смерти
                 if (battle.challengerDragon != null && battle.challengerDragon.isDead()) {
-                    // Если дракон "умер" от ванилы — возрождаем
                     respawnDragonIfNeeded(battle, battle.challengerDragon, true);
                 }
                 if (battle.targetDragon != null && battle.targetDragon.isDead()) {
@@ -321,7 +383,7 @@ public class BattleManager {
     }
 
     // =========================================================================
-    //  ПОЛЁТ ПО КРУГУ
+    //  ПЛАВНЫЙ ПОЛЁТ ПО КРУГУ
     // =========================================================================
 
     private void startFlightTask(Battle battle, Location center) {
@@ -334,6 +396,8 @@ public class BattleManager {
                     return;
                 }
                 angle += 0.07;
+                if (angle > Math.PI * 2) angle -= Math.PI * 2;
+                
                 moveDragon(battle.challengerDragon, center, angle);
                 moveDragon(battle.targetDragon, center, angle + Math.PI);
             }
@@ -342,20 +406,24 @@ public class BattleManager {
 
     private void moveDragon(EnderDragon dragon, Location center, double angle) {
         if (dragon == null || dragon.isDead()) return;
+        
         double x = center.getX() + ORBIT_RADIUS * Math.cos(angle);
         double z = center.getZ() + ORBIT_RADIUS * Math.sin(angle);
         float yaw = (float) (Math.toDegrees(Math.atan2(-Math.sin(angle), Math.cos(angle))) + 90);
-        dragon.teleport(new Location(center.getWorld(), x, center.getY() + ORBIT_HEIGHT, z, yaw, 5f));
+        
+        Location target = new Location(center.getWorld(), x, center.getY() + ORBIT_HEIGHT, z, yaw, 5f);
+        dragon.teleport(target);
         dragon.setVelocity(new Vector(0, 0, 0));
+        
+        // Частицы следа
+        target.getWorld().spawnParticle(Particle.FLAME, target.getX(), target.getY() + 1, target.getZ(), 3, 0.5, 0.5, 0.5, 0.02);
     }
 
     // =========================================================================
-    //  ОБРАТНЫЙ ОТСЧЁТ И БИТВА
+    //  ИНТРО И ОБРАТНЫЙ ОТСЧЁТ
     // =========================================================================
 
-    private void startCountdown(Battle battle, Player challenger, Player target,
-                                 Dragon cDragon, Dragon tDragon,
-                                 EnderDragon cEnt, EnderDragon tEnt) {
+    private void startCountdown(Battle battle, Player challenger, Player target) {
         new BukkitRunnable() {
             int count = 3;
             @Override
@@ -364,6 +432,7 @@ public class BattleManager {
                     cancel();
                     return;
                 }
+                
                 if (count > 0) {
                     challenger.sendMessage("§c" + count + "...");
                     target.sendMessage("§c" + count + "...");
@@ -372,15 +441,18 @@ public class BattleManager {
                     cancel();
                     plugin.getMessageUtils().send(challenger, "battle-start");
                     plugin.getMessageUtils().send(target, "battle-start");
-                    startBattleAI(battle, cDragon, tDragon, cEnt, tEnt);
+                    startBattleAI(battle);
                     startBossBarUpdater(battle);
                 }
             }
         }.runTaskTimer(plugin, 20L, 20L);
     }
 
-    private void startBattleAI(Battle battle, Dragon cDragon, Dragon tDragon,
-                                EnderDragon cEnt, EnderDragon tEnt) {
+    // =========================================================================
+    //  ЗАПУСК БОЕВОЙ ФАЗЫ
+    // =========================================================================
+
+    private void startBattleAI(Battle battle) {
         battle.aiTask = new BukkitRunnable() {
             @Override
             public void run() {
@@ -388,7 +460,17 @@ public class BattleManager {
                     cancel();
                     return;
                 }
-                // Атакуем, используя хранимое здоровье
+                // Проверяем, живы ли драконы (по хранимому здоровью)
+                double hp1 = dragonHealth.getOrDefault(battle.challengerDragon, 1.0);
+                double hp2 = dragonHealth.getOrDefault(battle.targetDragon, 1.0);
+                
+                if (hp1 <= 0 || hp2 <= 0) {
+                    boolean challengerWon = hp2 <= 0;
+                    endBattle(battle, challengerWon);
+                    cancel();
+                    return;
+                }
+                
                 ai.tick(battle, dragonHealth);
             }
         }.runTaskTimer(plugin, 20L, 30L);
@@ -402,19 +484,14 @@ public class BattleManager {
                     cancel();
                     return;
                 }
+                
                 double hp1 = dragonHealth.getOrDefault(battle.challengerDragon, 1.0);
                 double hp2 = dragonHealth.getOrDefault(battle.targetDragon, 1.0);
-                double max1 = battle.challengerDragon.getMaxHealth();
-                double max2 = battle.targetDragon.getMaxHealth();
-                battle.bossBar1.setProgress(Math.max(0, Math.min(1, hp1 / max1)));
-                battle.bossBar2.setProgress(Math.max(0, Math.min(1, hp2 / max2)));
+                double max1 = battle.challengerDragon != null ? battle.challengerDragon.getMaxHealth() : 100;
+                double max2 = battle.targetDragon != null ? battle.targetDragon.getMaxHealth() : 100;
                 
-                // Проверка окончания битвы
-                if (hp1 <= 0 || hp2 <= 0) {
-                    boolean challengerWon = hp2 <= 0;
-                    endBattle(battle, cDragon, tDragon, challengerWon);
-                    cancel();
-                }
+                if (battle.bossBar1 != null) battle.bossBar1.setProgress(Math.max(0, Math.min(1, hp1 / max1)));
+                if (battle.bossBar2 != null) battle.bossBar2.setProgress(Math.max(0, Math.min(1, hp2 / max2)));
             }
         }.runTaskTimer(plugin, 0L, 20L);
     }
@@ -423,18 +500,22 @@ public class BattleManager {
     //  ЗАВЕРШЕНИЕ БИТВЫ
     // =========================================================================
 
-    private void endBattle(Battle battle, Dragon cDragon, Dragon tDragon, boolean challengerWon) {
+    private void endBattle(Battle battle, boolean challengerWon) {
         activeBattles.remove(battle.challenger);
         
         if (battle.aiTask != null) battle.aiTask.cancel();
         if (battle.bossBarTask != null) battle.bossBarTask.cancel();
         if (battle.flightTask != null) battle.flightTask.cancel();
         
-        if (battle.challengerDragon != null) battle.challengerDragon.remove();
-        if (battle.targetDragon != null) battle.targetDragon.remove();
-        
-        dragonHealth.remove(battle.challengerDragon);
-        dragonHealth.remove(battle.targetDragon);
+        // Удаляем драконов
+        if (battle.challengerDragon != null) {
+            dragonHealth.remove(battle.challengerDragon);
+            battle.challengerDragon.remove();
+        }
+        if (battle.targetDragon != null) {
+            dragonHealth.remove(battle.targetDragon);
+            battle.targetDragon.remove();
+        }
         
         if (battle.bossBar1 != null) battle.bossBar1.removeAll();
         if (battle.bossBar2 != null) battle.bossBar2.removeAll();
@@ -442,23 +523,59 @@ public class BattleManager {
         Player challenger = Bukkit.getPlayer(battle.challenger);
         Player target = Bukkit.getPlayer(battle.target);
         
+        // Получаем драконов из менеджера
+        Dragon cDragon = plugin.getDragonManager().getDragon(battle.challenger);
+        Dragon tDragon = plugin.getDragonManager().getDragon(battle.target);
+        
         Dragon winner = challengerWon ? cDragon : tDragon;
         Dragon loser = challengerWon ? tDragon : cDragon;
         
+        long winExp = plugin.getConfig().getLong("battle-win-exp", 50);
+        long recoveryMin = plugin.getConfig().getLong("recovery-time", 5);
+        
+        // Победитель
+        plugin.getDragonManager().addExperience(winner, winExp);
+        
+        // Проигравший
+        long recoveryEnd = System.currentTimeMillis() + recoveryMin * 60_000L;
+        loser.setRecoveryEndTime(recoveryEnd);
+        plugin.getDataManager().saveDragon(loser);
+        
+        // Возвращаем и награждаем игроков
         if (challenger != null) {
             challenger.teleport(battle.challengerReturn);
             plugin.getDragonManager().spawnDragonForPlayer(challenger, winner);
-            plugin.getMessageUtils().send(challenger, "battle-won", "{exp}", "50");
+            if (challengerWon) {
+                plugin.getMessageUtils().send(challenger, "battle-won", "{exp}", String.valueOf(winExp));
+            } else {
+                plugin.getMessageUtils().send(challenger, "battle-lost", "{time}", String.valueOf(recoveryMin));
+            }
         }
         if (target != null) {
             target.teleport(battle.targetReturn);
+            plugin.getDragonManager().spawnDragonForPlayer(target, winner);
             if (!challengerWon) {
-                plugin.getDragonManager().spawnDragonForPlayer(target, winner);
+                plugin.getMessageUtils().send(target, "battle-won", "{exp}", String.valueOf(winExp));
+            } else {
+                plugin.getMessageUtils().send(target, "battle-lost", "{time}", String.valueOf(recoveryMin));
             }
-            plugin.getMessageUtils().send(target, challengerWon ? "battle-lost" : "battle-won", "{time}", "5");
         }
         
         usedArenaSlots.remove(battle.arenaIndex);
+        
+        // Таймер восстановления проигравшего
+        new BukkitRunnable() {
+            @Override
+            public void run() {
+                loser.setRecoveryEndTime(0);
+                plugin.getDataManager().saveDragon(loser);
+                Player loserOnline = Bukkit.getPlayer(loser.getOwnerUUID());
+                if (loserOnline != null && loserOnline.isOnline()) {
+                    plugin.getDragonManager().spawnDragonForPlayer(loserOnline, loser);
+                    plugin.getMessageUtils().sendRaw(loserOnline, "&aВаш дракон восстановился!");
+                }
+            }
+        }.runTaskLater(plugin, recoveryMin * 60 * 20L);
     }
 
     // =========================================================================
