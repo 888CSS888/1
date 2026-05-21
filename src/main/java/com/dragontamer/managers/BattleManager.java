@@ -11,7 +11,6 @@ import org.bukkit.boss.BossBar;
 import org.bukkit.entity.EnderDragon;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Player;
-import org.bukkit.generator.ChunkGenerator;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.Vector;
@@ -29,7 +28,7 @@ public class BattleManager {
     private final Set<Integer> usedArenaSlots = new HashSet<>();
     private final Map<UUID, UUID> watcherBattleMap = new HashMap<>();
 
-    // Константы арены
+    // Константы арены (для 1.12.2)
     private static final int ARENA_SIZE = 51;
     private static final int ARENA_HALF = 25;
     private static final int PLATFORM_Y = 100;
@@ -46,16 +45,10 @@ public class BattleManager {
     //  ПУБЛИЧНЫЕ МЕТОДЫ ДЛЯ КОМАНД
     // =========================================================================
 
-    /**
-     * Отправить запрос на битву
-     */
     public void sendChallenge(Player challenger, Player target) {
         sendBattleRequest(challenger.getUniqueId(), target.getUniqueId());
     }
 
-    /**
-     * Принять запрос на битву
-     */
     public void acceptChallenge(Player player) {
         UUID challengerUUID = getChallengerFor(player.getUniqueId());
         if (challengerUUID == null) {
@@ -65,9 +58,6 @@ public class BattleManager {
         startBattle(challengerUUID, player.getUniqueId());
     }
 
-    /**
-     * Отклонить запрос на битву
-     */
     public void rejectChallenge(Player player) {
         UUID challengerUUID = getChallengerFor(player.getUniqueId());
         if (challengerUUID == null) {
@@ -82,25 +72,16 @@ public class BattleManager {
         plugin.getMessageUtils().send(player, "battle-rejected-self");
     }
 
-    /**
-     * Проверить, в битве ли игрок
-     */
     public boolean isInBattle(UUID uuid) {
         for (Battle b : activeBattles.values())
             if (b.challenger.equals(uuid) || b.target.equals(uuid)) return true;
         return false;
     }
 
-    /**
-     * Проверить, является ли игрок наблюдателем
-     */
     public boolean isWatcher(UUID playerUUID) {
         return watcherBattleMap.containsKey(playerUUID);
     }
 
-    /**
-     * Удалить наблюдателя
-     */
     public void removeWatcher(UUID watcherUUID) {
         UUID challengerUUID = watcherBattleMap.remove(watcherUUID);
         if (challengerUUID == null) return;
@@ -111,9 +92,6 @@ public class BattleManager {
         }
     }
 
-    /**
-     * Получить ключ битвы для участника
-     */
     public UUID getBattleKey(UUID participantUUID) {
         for (Map.Entry<UUID, Battle> e : activeBattles.entrySet()) {
             Battle b = e.getValue();
@@ -123,9 +101,6 @@ public class BattleManager {
         return null;
     }
 
-    /**
-     * Добавить наблюдателя
-     */
     public void watchBattle(Player watcher, UUID challengerUUID) {
         Battle battle = activeBattles.get(challengerUUID);
         if (battle == null) {
@@ -143,20 +118,15 @@ public class BattleManager {
         battle.watchers.add(watcher.getUniqueId());
         watcherBattleMap.put(watcher.getUniqueId(), challengerUUID);
 
-        // Телепорт на трибуны
         Location seat = arenaCenter.clone().add(0, 2, -(ARENA_HALF - 3));
         watcher.teleport(seat);
 
-        // Добавляем BossBar для наблюдателя
         if (battle.challengerOwnBar != null) battle.challengerOwnBar.addPlayer(watcher);
         if (battle.challengerEnemyBar != null) battle.challengerEnemyBar.addPlayer(watcher);
 
         plugin.getMessageUtils().sendRaw(watcher, "&aВы наблюдаете за битвой!");
     }
 
-    /**
-     * Уклонение
-     */
     public boolean doDodge(Player player, String direction) {
         long now = System.currentTimeMillis();
         long cdMs = plugin.getConfig().getLong("battle.dodge-cooldown-seconds", 5) * 1000L;
@@ -197,7 +167,7 @@ public class BattleManager {
         }
         
         player.setVelocity(dodgeVec);
-        player.getWorld().playSound(player.getLocation(), Sound.ENTITY_ENDERMEN_TELEPORT, 1f, 1.3f);
+        player.getWorld().playSound(player.getLocation(), Sound.ENTITY_ENDERMAN_TELEPORT, 1f, 1.3f);
         player.getWorld().spawnParticle(Particle.CLOUD, player.getLocation().add(0, 1, 0), 15, 0.4, 0.4, 0.4, 0.05);
         plugin.getMessageUtils().send(player, "dodge-used", "{dir}", dirKey);
         
@@ -243,7 +213,6 @@ public class BattleManager {
 
         if (challenger == null || target == null || cDragon == null || tDragon == null) return;
 
-        // Проверяем максимальное количество битв
         int maxBattles = plugin.getConfig().getInt("battle.max-concurrent-battles", 5);
         if (activeBattles.size() >= maxBattles) {
             plugin.getMessageUtils().sendRaw(challenger, "&cМаксимальное число битв достигнуто");
@@ -251,7 +220,6 @@ public class BattleManager {
             return;
         }
 
-        // Получаем или создаём мир арены
         World arenaWorld = Bukkit.getWorld("dragon_arena");
         if (arenaWorld == null) {
             plugin.getLogger().warning("Мир dragon_arena не найден! Создаём...");
@@ -261,7 +229,6 @@ public class BattleManager {
             arenaWorld = wc.createWorld();
         }
 
-        // Находим свободный слот
         int slot = 0;
         while (usedArenaSlots.contains(slot)) slot++;
         usedArenaSlots.add(slot);
@@ -269,7 +236,6 @@ public class BattleManager {
         double spacing = 150.0;
         Location arenaCenter = new Location(arenaWorld, slot * spacing, PLATFORM_Y, 0);
 
-        // Строим арену
         plugin.getMessageUtils().send(challenger, "battle-arena-building");
         plugin.getMessageUtils().send(target, "battle-arena-building");
 
@@ -278,21 +244,17 @@ public class BattleManager {
         battle.arenaCenter = arenaCenter.clone();
         buildArena(arenaCenter, battle);
 
-        // Сохраняем позиции для возврата
         battle.challengerReturn = challenger.getLocation().clone();
         battle.targetReturn = target.getLocation().clone();
 
-        // Деспауним обычных драконов
         plugin.getDragonManager().despawnDragon(cDragon);
         plugin.getDragonManager().despawnDragon(tDragon);
 
-        // Телепортируем игроков на безопасные позиции
         Location cStand = arenaCenter.clone().add(0, 1, -(ARENA_HALF - 3));
         Location tStand = arenaCenter.clone().add(0, 1, (ARENA_HALF - 3));
         challenger.teleport(cStand);
         target.teleport(tStand);
 
-        // Спавним боевых драконов
         Location cDragonLoc = arenaCenter.clone().add(-ORBIT_RADIUS, ORBIT_HEIGHT, 0);
         Location tDragonLoc = arenaCenter.clone().add(ORBIT_RADIUS, ORBIT_HEIGHT, 0);
 
@@ -307,7 +269,6 @@ public class BattleManager {
         battle.challengerDragon = cEnt;
         battle.targetDragon = tEnt;
 
-        // BossBar
         String cName = plugin.getDragonManager().getDragonDisplayName(cDragon);
         String tName = plugin.getDragonManager().getDragonDisplayName(tDragon);
         battle.challengerOwnBar = createBar("§a⚔ " + stripColor(cName), BarColor.GREEN, BarStyle.SEGMENTED_10);
@@ -322,10 +283,7 @@ public class BattleManager {
 
         activeBattles.put(challengerUUID, battle);
 
-        // Запускаем круговой полёт
         startFlightTask(battle, arenaCenter);
-
-        // Запускаем 10-секундное интро
         startIntro(battle, challenger, target, cDragon, tDragon, cEnt, tEnt);
     }
 
@@ -339,7 +297,7 @@ public class BattleManager {
         int cz = center.getBlockZ();
         ArenaData data = battle.arenaData;
 
-        // 1. ОСНОВНАЯ ПЛАТФОРМА (пол)
+        // Пол платформы
         for (int x = -ARENA_HALF; x <= ARENA_HALF; x++) {
             for (int z = -ARENA_HALF; z <= ARENA_HALF; z++) {
                 double dist = Math.sqrt(x * x + z * z);
@@ -349,19 +307,19 @@ public class BattleManager {
             }
         }
 
-        // 2. БОРТИК
+        // Бортик
         for (int x = -ARENA_HALF; x <= ARENA_HALF; x++) {
             for (int z = -ARENA_HALF; z <= ARENA_HALF; z++) {
                 double dist = Math.sqrt(x * x + z * z);
                 if (dist > ARENA_HALF - 1 && dist <= ARENA_HALF + 1) {
                     for (int y = 1; y <= 2; y++) {
-                        placeBlock(world, cx + x, PLATFORM_Y + y, cz + z, Material.SMOOTH_BRICK, data);
+                        placeBlock(world, cx + x, PLATFORM_Y + y, cz + z, Material.STONE_BRICKS, data);
                     }
                 }
             }
         }
 
-        // 3. СТЕНЫ
+        // Стены из барьера
         int wallYStart = PLATFORM_Y + 1;
         for (int y = 0; y <= WALL_HEIGHT; y++) {
             for (int x = -ARENA_HALF - 2; x <= ARENA_HALF + 2; x++) {
@@ -374,7 +332,7 @@ public class BattleManager {
             }
         }
 
-        // 4. ТРИБУНЫ
+        // Трибуны
         for (int row = 0; row < 4; row++) {
             int zNorth = cz - ARENA_HALF + row;
             int zSouth = cz + ARENA_HALF - row;
@@ -384,7 +342,7 @@ public class BattleManager {
             }
         }
 
-        // 5. УГЛОВЫЕ КОЛОННЫ
+        // Угловые колонны
         for (int cxOff : new int[]{-ARENA_HALF - 2, ARENA_HALF + 2}) {
             for (int czOff : new int[]{-ARENA_HALF - 2, ARENA_HALF + 2}) {
                 for (int y = 0; y <= WALL_HEIGHT + 2; y++) {
@@ -398,14 +356,14 @@ public class BattleManager {
     private void placeBlock(World world, int x, int y, int z, Material mat, ArenaData data) {
         try {
             Block b = world.getBlockAt(x, y, z);
-            if (b.getType() == mat && b.getData() == 0) return;
+            if (b.getType() == mat) return;
             data.record(world, x, y, z, b.getType(), b.getData());
             b.setType(mat);
         } catch (Exception ignored) {}
     }
 
     // =========================================================================
-    //  ПЛАВНЫЙ ПОЛЁТ
+    //  ПОЛЁТ ДРАКОНОВ
     // =========================================================================
 
     private void startFlightTask(Battle battle, Location center) {
@@ -447,11 +405,11 @@ public class BattleManager {
     private void spawnTrailParticles(EnderDragon dragon) {
         if (dragon == null || dragon.isDead()) return;
         Location loc = dragon.getLocation();
-        loc.getWorld().spawnParticle(Particle.DRAGON_BREATH, loc.getX(), loc.getY() + 1, loc.getZ(), 5, 1, 0.5, 1, 0.02);
+        loc.getWorld().spawnParticle(Particle.FLAME, loc.getX(), loc.getY() + 1, loc.getZ(), 5, 1, 0.5, 1, 0.02);
     }
 
     // =========================================================================
-    //  ИНТРО И ОБРАТНЫЙ ОТСЧЁТ
+    //  ИНТРО И ОТСЧЁТ
     // =========================================================================
 
     private void startIntro(Battle battle, Player challenger, Player target,
@@ -499,7 +457,7 @@ public class BattleManager {
     }
 
     // =========================================================================
-    //  ЗАПУСК БОЕВОЙ ФАЗЫ
+    //  ЗАПУСК БОЯ
     // =========================================================================
 
     private void launchBattle(Battle battle, Player challenger, Player target,
