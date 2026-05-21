@@ -157,7 +157,7 @@ public class BattleManager {
         }
         
         player.setVelocity(dodgeVec);
-        player.getWorld().playSound(player.getLocation(), Sound.ENTITY_ENDERMAN_TELEPORT, 1f, 1.3f);
+        player.getWorld().playSound(player.getLocation(), Sound.ENTITY_ENDERMEN_TELEPORT, 1f, 1.3f);
         player.getWorld().spawnParticle(Particle.CLOUD, player.getLocation().add(0, 1, 0), 15, 0.4, 0.4, 0.4, 0.05);
         plugin.getMessageUtils().send(player, "dodge-used", "{dir}", dirKey);
         
