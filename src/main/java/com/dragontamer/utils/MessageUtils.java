@@ -3,28 +3,13 @@ package com.dragontamer.utils;
 import com.dragontamer.DragonTamerPlugin;
 import org.bukkit.ChatColor;
 import org.bukkit.command.CommandSender;
-import org.bukkit.configuration.file.FileConfiguration;
-import org.bukkit.configuration.file.YamlConfiguration;
-
-import java.io.File;
-import java.util.logging.Level;
+import org.bukkit.entity.Player;
 
 public class MessageUtils {
-
     private final DragonTamerPlugin plugin;
-    private FileConfiguration messagesConfig;
 
     public MessageUtils(DragonTamerPlugin plugin) {
         this.plugin = plugin;
-        reload();
-    }
-
-    public void reload() {
-        File file = new File(plugin.getDataFolder(), "messages.yml");
-        if (!file.exists()) {
-            plugin.saveResource("messages.yml", false);
-        }
-        messagesConfig = YamlConfiguration.loadConfiguration(file);
     }
 
     public String colorize(String text) {
@@ -32,49 +17,48 @@ public class MessageUtils {
         return ChatColor.translateAlternateColorCodes('&', text);
     }
 
-    private String getPrefix() {
-        return colorize(messagesConfig.getString("prefix", "&8[&6DragonTamer&8] &r"));
+    public String getPrefix() {
+        String prefix = plugin.getConfig().getString("messages.prefix", "&8[&6DragonTamer&8] ");
+        return colorize(prefix);
     }
 
-    /**
-     * Получить строку сообщения по ключу с подстановкой плейсхолдеров.
-     * @param key    ключ в messages.yml (раздел messages.)
-     * @param placeholders пары placeholder, value
-     */
-    public String get(String key, String... placeholders) {
-        String raw = messagesConfig.getString("messages." + key, "&cСообщение не найдено: " + key);
-        raw = applyPlaceholders(raw, placeholders);
+    public String get(String key) {
+        String raw = plugin.getConfig().getString("messages." + key);
+        if (raw == null) {
+            plugin.getLogger().warning("⚠ Message not found: " + key);
+            // Возвращаем стандартное сообщение вместо ошибки
+            switch (key) {
+                case "battle-request-sent": return "&6Вы вызвали {target} на битву!";
+                case "battle-request-received": return "&6{challenger} вызывает вас на битву! /dr accept";
+                case "battle-accepted": return "&aБитва принята!";
+                case "battle-rejected": return "&c{target} отклонил вызов";
+                case "battle-start": return "&c⚔ БИТВА НАЧАЛАСЬ!";
+                default: return "&cСообщение не найдено: " + key;
+            }
+        }
         return colorize(raw);
     }
 
-    /**
-     * Отправить сообщение по ключу с плейсхолдерами.
-     */
-    public void send(CommandSender sender, String key, String... placeholders) {
-        String msg = get(key, placeholders);
-        if (msg.contains("\n")) {
-            for (String line : msg.split("\n")) {
-                sender.sendMessage(getPrefix() + line);
-            }
-        } else {
-            sender.sendMessage(getPrefix() + msg);
-        }
-    }
-
-    /**
-     * Отправить сырое сообщение (с подстановкой цветов).
-     */
-    public void sendRaw(CommandSender sender, String text) {
-        sender.sendMessage(getPrefix() + colorize(text));
-    }
-
-    private String applyPlaceholders(String text, String[] placeholders) {
-        if (placeholders == null || placeholders.length == 0) return text;
-        for (int i = 0; i + 1 < placeholders.length; i += 2) {
-            if (placeholders[i] != null && placeholders[i + 1] != null) {
-                text = text.replace(placeholders[i], placeholders[i + 1]);
+    public String get(String key, String... replacements) {
+        String msg = get(key);
+        for (int i = 0; i + 1 < replacements.length; i += 2) {
+            String target = replacements[i];
+            String value = replacements[i + 1];
+            if (msg.contains(target)) {
+                msg = msg.replace(target, value);
             }
         }
-        return text;
+        return msg;
+    }
+
+    public void send(CommandSender sender, String key, String... replacements) {
+        if (sender == null) return;
+        String msg = get(key, replacements);
+        sender.sendMessage(getPrefix() + msg);
+    }
+
+    public void sendRaw(CommandSender sender, String message) {
+        if (sender == null) return;
+        sender.sendMessage(getPrefix() + colorize(message));
     }
 }
