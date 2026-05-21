@@ -15,36 +15,40 @@ import java.util.concurrent.ThreadLocalRandom;
 public class BattleAI {
 
     private final DragonTamerPlugin plugin;
-    private final Map<UUID, Long> lastAttackTime = new HashMap<>();
+    private final Map<String, Long> lastAttackTime = new HashMap<>();
 
     public BattleAI(DragonTamerPlugin plugin) {
         this.plugin = plugin;
     }
 
     public void tick(BattleManager.Battle battle, Map<EnderDragon, Double> dragonHealth) {
-        EnderDragon attacker = battle.challengerDragon;
-        EnderDragon victim = battle.targetDragon;
+        EnderDragon attacker1 = battle.challengerDragon;
+        EnderDragon victim1 = battle.targetDragon;
         UUID battleId = battle.challenger;
         
         // Атака от первого дракона
-        performAttack(attacker, victim, battleId, dragonHealth);
+        if (attacker1 != null && victim1 != null && !attacker1.isDead() && !victim1.isDead()) {
+            performAttack(attacker1, victim1, battleId.toString() + "-1", dragonHealth);
+        }
         
         // Атака от второго дракона
-        performAttack(victim, attacker, battleId, dragonHealth);
+        EnderDragon attacker2 = battle.targetDragon;
+        EnderDragon victim2 = battle.challengerDragon;
+        if (attacker2 != null && victim2 != null && !attacker2.isDead() && !victim2.isDead()) {
+            performAttack(attacker2, victim2, battleId.toString() + "-2", dragonHealth);
+        }
     }
 
-    private void performAttack(EnderDragon attacker, EnderDragon victim, UUID battleId, Map<EnderDragon, Double> dragonHealth) {
-        if (attacker == null || victim == null || attacker.isDead() || victim.isDead()) return;
-        
+    private void performAttack(EnderDragon attacker, EnderDragon victim, String cooldownKey, Map<EnderDragon, Double> dragonHealth) {
         long now = System.currentTimeMillis();
-        long last = lastAttackTime.getOrDefault(battleId + attacker.getUniqueId().toString(), 0L);
+        long last = lastAttackTime.getOrDefault(cooldownKey, 0L);
         
         // Атака раз в 2 секунды
         if (now - last < 2000) return;
         
-        lastAttackTime.put(battleId + attacker.getUniqueId().toString(), now);
+        lastAttackTime.put(cooldownKey, now);
         
-        // Выбираем тип атаки
+        // Выбираем тип атаки (0-2)
         int type = ThreadLocalRandom.current().nextInt(3);
         
         switch (type) {
@@ -73,7 +77,6 @@ public class BattleAI {
         world.playSound(from, Sound.ENTITY_GHAST_SHOOT, 1.5f, 1f);
         world.spawnParticle(Particle.FLAME, from, 20, 1, 1, 1, 0.1);
         
-        // Задержанный урон
         applyDamage(victim, dragonHealth, 8.0, 10L);
     }
 
@@ -119,6 +122,8 @@ public class BattleAI {
 
     private void applyDamage(EnderDragon victim, Map<EnderDragon, Double> dragonHealth, double damage, long delayTicks) {
         plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
+            if (victim == null || victim.isDead()) return;
+            
             double current = dragonHealth.getOrDefault(victim, victim.getHealth());
             double newHealth = Math.max(0, current - damage);
             dragonHealth.put(victim, newHealth);
