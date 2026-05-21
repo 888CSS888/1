@@ -1,0 +1,66 @@
+# DragonTamer 1.3.3 - Сообщения
+prefix: "&8[&6DragonTamer&8] &r"
+
+messages:
+  no-permission: "&cУ вас нет прав на это действие."
+  no-dragon: "&cУ вас нет активного дракона. Используйте яйцо дракона!"
+  invalid-world: "&cВ этом мире дракон недоступен."
+  egg-used: "&aВы вылупили {type}&a!"
+  collection-full: "&cКоллекция переполнена! Максимум {max} драконов."
+  dragon-moved-to-collection: "&7Предыдущий дракон перемещён в коллекцию."
+
+  dragon-follow: "&aДракон следует за вами."
+  dragon-stay: "&7Дракон остался на месте."
+  dragon-farm: "&aДракон отправился собирать ресурсы!"
+  dragon-recovering: "&cДракон восстанавливается ещё {time} мин."
+  dragon-named: "&aДракон переименован в &e{name}&a ({type}&a)."
+  dragon-name-cleared: "&7Имя дракона сброшено (было: &e{old}&7)."
+
+  orbit-enabled: "&aДракон перешёл в режим орбиты."
+  orbit-disabled: "&7Режим орбиты выключен."
+  autofarm-enabled: "&aАвто-ферма включена (каждые {interval} сек)."
+  autofarm-disabled: "&7Авто-ферма выключена."
+
+  farm-cooldown: "&cФарм на перезарядке! Осталось {time} мин."
+
+  # Битва
+  battle-challenge-sent: "&6Вы вызвали &e{target} &6на битву! Ждите ответа..."
+  battle-challenge-received: "&6Игрок &e{challenger} &6вызывает вас на битву! &a/dr accept &7или &c/dr reject &7(30 сек)"
+  battle-already-in-battle: "&cВы уже участвуете в битве."
+  battle-target-in-battle: "&cЦелевой игрок уже в битве."
+  battle-no-dragon: "&cУ вас нет дракона для битвы."
+  battle-target-no-dragon: "&cУ вашего противника нет дракона."
+  battle-no-challenge: "&cВам никто не бросал вызов."
+  battle-rejected: "&cИгрок {target} отклонил вызов."
+  battle-reject-notify: "&7Вы отклонили вызов от &e{challenger}&7."
+  battle-timeout: "&7Вызов от &e{challenger} &7истёк."
+  battle-start: "&6Битва началась! &e{player1} &6vs &e{player2}&6!"
+  battle-start-self: "&aБитва с &e{opponent} &aначинается! Ваш дракон сражается!"
+  battle-win: "&a&lПОБЕДА! &r&aВы победили &e{loser}&a!"
+  battle-lose: "&c&lПОРАЖЕНИЕ! &r&cВаш дракон побеждён игроком &e{winner}&c."
+  battle-broadcast: "&6[Битва] &e{winner} &6победил &e{loser} &6в битве драконов!"
+  battle-watch-usage: "&cИспользование: /dr watch <игрок>"
+  battle-watch-in-battle: "&cВы не можете наблюдать — вы в битве."
+  battle-watch-already: "&cВы уже наблюдаете за битвой."
+  battle-watch-not-found: "&cИгрок {target} не участвует в битве."
+  battle-watch-start: "&7Вы наблюдаете за битвой &e{player1} &7vs &e{player2}&7."
+  battle-watch-end: "&7Наблюдение за битвой завершено."
+
+  dodge-not-in-battle: "&cВы не в битве."
+  dodge-used: "&bУклонение: {direction}!"
+  dodge-cooldown: "&cУклонение на перезарядке!"
+
+  # Топ
+  top-header: "&6=== Топ-10 Драконов ==="
+  top-empty: "&7Драконов ещё нет."
+  top-entry: "&e{rank}. &f{name} &7— &6{type} &7(Ур. {level})"
+
+  # Инфо о драконе
+  dragon-info: |-
+    &6--- Информация о драконе ---
+    &7Имя: &f{name}
+    &7Тип: &f{type}
+    &7Уровень: &f{level} &7(&f{exp}&7/&f{maxexp}&7 опыта)
+    &7Здоровье: &f{hp}&7/&f{maxhp}
+    &7Режим: &f{mode}
+  dragon-info-recovering: "&cДракон восстанавливается ещё {time} мин."

@@ -1,0 +1,27 @@
+name: DragonTamer
+version: 1.3.3
+main: com.dragontamer.DragonTamerPlugin
+api-version: 1.12
+author: Alexey Sipachyov
+description: Tame and battle with dragons. Multi-arena PvP with smooth dragon flight.
+softdepend: [PlaceholderAPI]
+
+commands:
+  dr:
+    description: Main DragonTamer command
+    usage: /dr <subcommand>
+    permission: dragontamer.use
+
+permissions:
+  dragontamer.use:
+    description: Basic dragon commands
+    default: true
+  dragontamer.battle:
+    description: Battle commands (battle, accept, reject, dodge, watch)
+    default: true
+  dragontamer.admin:
+    description: Admin commands (give, remove, setlevel, reload)
+    default: op
+  dragontamer.colorname:
+    description: Use color codes in dragon names
+    default: op
